@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Ogden Valley Snow Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Archivo:wght@500;700;800&display=swap">
+<style>
+/* Layout: one column, phone first. Headline call, alerts, then one table per region. */
+:root{
+  --bg:#f3f6f8; --panel:#ffffff; --fg:#14202b; --muted:#5b6b78; --line:#d9e1e7;
+  --accent:#1f5f8b; --alert:#b4232c; --alert-bg:#fbe9ea; --watch:#9a5b00; --watch-bg:#fdf1dc;
+  --snow-bg:#e3eef6;
+  --display:"Archivo",system-ui,sans-serif; --body:"Archivo",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0e161d; --panel:#16212b; --fg:#e6edf2; --muted:#93a4b2; --line:#26343f;
+  --accent:#7bb8e0; --alert:#ff7b82; --alert-bg:#3a1a1d; --watch:#f2b24c; --watch-bg:#33270f;
+  --snow-bg:#1b3242; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--body);
+  padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+main{max-width:760px;margin:0 auto;display:grid;gap:20px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+h1{font:800 22px/1.1 var(--display);margin:0;letter-spacing:-.01em}
+h2{font:700 13px/1 var(--display);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 8px}
+.stamp{font:12px var(--mono);color:var(--muted)}
+button{font:600 13px var(--body);color:var(--accent);background:transparent;border:1px solid var(--line);
+  border-radius:6px;padding:6px 10px;cursor:pointer}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.headline{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+.headline .big{font:800 26px/1.15 var(--display);text-wrap:balance}
+.headline .sub{color:var(--muted);margin-top:6px}
+.alerts{display:grid;gap:8px}
+.alert{border-radius:8px;padding:10px 12px;display:grid;gap:2px}
+.alert.storm{background:var(--alert-bg);color:var(--alert)}
+.alert.watch{background:var(--watch-bg);color:var(--watch)}
+.alert b{font-family:var(--display)}
+.alert .detail{color:var(--fg);font-size:14px}
+.none{color:var(--muted)}
+section.region{display:grid;gap:12px}
+.loc{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.loc h3{font:700 16px var(--display);margin:0;padding:12px 14px 4px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.loc h3 span{font:12px var(--mono);color:var(--muted)}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font:13px var(--mono);font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;text-align:right;white-space:nowrap;border-top:1px solid var(--line)}
+th{font:600 11px var(--body);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-top:0}
+th:first-child,td:first-child{text-align:left}
+td.snow{font-weight:600}
+td.snow.has{background:var(--snow-bg)}
+td.note{text-align:left;color:var(--muted);font-family:var(--body);white-space:normal;min-width:120px}
+.err{color:var(--alert)}
+.notes{color:var(--muted);font-size:13px;display:grid;gap:6px}
+.notes p{margin:0;max-width:65ch}
+@media (prefers-reduced-motion:no-preference){.loading{animation:p 1.2s ease-in-out infinite}}
+@keyframes p{50%{opacity:.4}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Snow Report</h1>
+    <div style="display:flex;gap:10px;align-items:center">
+      <span class="stamp" id="stamp">Loading…</span>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <div class="headline" id="headline"><div class="big loading">Pulling forecasts…</div></div>
+
+  <div><h2>Alerts</h2><div class="alerts" id="alerts"></div></div>
+
+  <div id="regions"></div>
+
+  <div class="notes">
+    <h2>How to read this</h2>
+    <p>Snow is inches per day, shown as two models: NBM (NOAA's National Blend of Models) / ECMWF. When both agree, trust it more. A spread like 2 / 11 means the storm is uncertain.</p>
+    <p>Storm alert: 10"+ on the higher model. Watch: 6 to 9". Storms group consecutive days with 0.5"+ on either model.</p>
+    <p>Freezing level is the height where air hits 32°F. Snow usually reaches about 1,000 ft below it. If it sits near or below base elevation during precip, expect rain at the base.</p>
+    <p>Forecast points use each spot's terrain elevation, not the summit. Data: Open-Meteo (open-meteo.com), free and keyless.</p>
+  </div>
+</main>
+
+<script>
+const LOCATIONS = [
+  {name:"Snowbasin", lat:41.201433, lon:-111.864299, region:"Ogden Valley / Wasatch"},
+  {name:"Powder Mountain", lat:41.379715, lon:-111.780932, region:"Ogden Valley / Wasatch"},
+  {name:"Nordic Valley", lat:41.308869, lon:-111.866045, region:"Ogden Valley / Wasatch"},
+  {name:"Home (Mountain Green)", lat:41.159615, lon:-111.798391, region:"Ogden Valley / Wasatch"},
+  {name:"Kirkwood", lat:38.676968, lon:-120.072701, region:"Tahoe"},
+  {name:"Mount Bachelor", lat:43.993020, lon:-121.686957, region:"Central Oregon"},
+];
+const MODELS = [{id:"ncep_nbm_conus", label:"NBM"}, {id:"ecmwf_ifs025", label:"ECMWF"}];
+const STORM_MIN = 0.5, ALERT = 10, WATCH = 6;
+
+const $ = id => document.getElementById(id);
+const r1 = v => v == null ? null : Math.round(v * 10) / 10;
+const fmt = v => v == null ? "–" : (v < 0.1 ? "0" : r1(v).toFixed(1));
+const dayName = iso => new Date(iso + "T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"numeric",day:"numeric"});
+const mToFt = m => Math.round(m * 3.28084 / 100) * 100;
+
+function buildUrl(){
+  const p = new URLSearchParams({
+    latitude: LOCATIONS.map(l=>l.lat).join(","),
+    longitude: LOCATIONS.map(l=>l.lon).join(","),
+    daily: "snowfall_sum,temperature_2m_max,temperature_2m_min,precipitation_sum",
+    hourly: "freezing_level_height,precipitation",
+    models: MODELS.map(m=>m.id).join(","),
+    temperature_unit: "fahrenheit",
+    precipitation_unit: "inch",
+    timezone: "auto",
+    forecast_days: "7",
+  });
+  return "https://api.open-meteo.com/v1/forecast?" + p;
+}
+
+// Pull per-model values out of one location's response.
+function parseLocation(loc, d){
+  const days = d.daily.time.map((t, i) => {
+    const row = {date:t, snow:{}, hi:null, lo:null, precip:false, fzl:null};
+    for (const m of MODELS){
+      const s = d.daily[`snowfall_sum_${m.id}`]?.[i];
+      row.snow[m.label] = s == null ? null : s;
+      row.hi ??= d.daily[`temperature_2m_max_${m.id}`]?.[i] ?? null;
+      row.lo ??= d.daily[`temperature_2m_min_${m.id}`]?.[i] ?? null;
+      if ((d.daily[`precipitation_sum_${m.id}`]?.[i] ?? 0) >= 0.02) row.precip = true;
+    }
+    return row;
+  });
+  // Lowest freezing level during hours with precipitation, per day.
+  const h = d.hourly;
+  if (h){
+    h.time.forEach((t, j) => {
+      const row = days.find(x => x.date === t.slice(0,10));
+      if (!row) return;
+      for (const m of MODELS){
+        const fz = h[`freezing_level_height_${m.id}`]?.[j];
+        const pr = h[`precipitation_${m.id}`]?.[j];
+        if (fz != null && pr != null && pr > 0) row.fzl = row.fzl == null ? fz : Math.min(row.fzl, fz);
+      }
+    });
+  }
+  return {...loc, elevFt: Math.round((d.elevation ?? 0) * 3.28084), days, storms: findStorms(days)};
+}
+
+// Group consecutive snow days into storms. Low/high = the two models' totals.
+function findStorms(days){
+  const storms = []; let cur = null;
+  for (const d of days){
+    const vals = MODELS.map(m => d.snow[m.label] ?? 0);
+    if (Math.max(...vals) >= STORM_MIN){
+      if (!cur) cur = {start:d.date, end:d.date, totals:MODELS.map(()=>0)};
+      cur.end = d.date; vals.forEach((v,i)=> cur.totals[i] += v);
+    } else if (cur){ storms.push(cur); cur = null; }
+  }
+  if (cur) storms.push(cur);
+  return storms.map(s => ({...s, low: Math.min(...s.totals), high: Math.max(...s.totals),
+    level: Math.max(...s.totals) >= ALERT ? "storm" : Math.max(...s.totals) >= WATCH ? "watch" : null}));
+}
+
+function span(s){ return s.start === s.end ? dayName(s.start) : `${dayName(s.start)} to ${dayName(s.end)}`; }
+
+function render(locs){
+  const ski = locs.filter(l => !l.name.startsWith("Home"));
+  // Headline: biggest storm, ranked on the lower model so agreement wins.
+  let best = null;
+  for (const l of ski) for (const s of l.storms)
+    if (!best || s.low > best.s.low || (s.low === best.s.low && s.high > best.s.high)) best = {l, s};
+  const hl = $("headline");
+  if (!best || best.s.high < 2){
+    hl.innerHTML = `<div class="big">No significant snow in the next 7 days.</div>`;
+  } else {
+    const agree = best.s.high - best.s.low <= Math.max(2, best.s.high * 0.35);
+    hl.innerHTML = `<div class="big">${best.l.name}, ${span(best.s)}: ${fmt(best.s.low)} to ${fmt(best.s.high)}"</div>
+      <div class="sub">${agree ? "Models agree. Good confidence." : "Models disagree. Wait for the next update before committing."}</div>`;
+  }
+
+  const al = [];
+  for (const l of locs) for (const s of l.storms) if (s.level) al.push({l, s});
+  al.sort((a,b)=> b.s.high - a.s.high);
+  $("alerts").innerHTML = al.length ? al.map(({l,s}) => `
+    <div class="alert ${s.level}"><b>${s.level === "storm" ? "STORM ALERT" : "WATCH"}: ${l.name}</b>
+    <span class="detail">${span(s)}, ${fmt(s.low)} to ${fmt(s.high)}"</span></div>`).join("")
+    : `<div class="none">No storms of 6"+ in the next 7 days.</div>`;
+
+  const regions = [...new Set(locs.map(l=>l.region))];
+  $("regions").innerHTML = regions.map(r => `
+    <section class="region"><h2>${r}</h2>
+    ${locs.filter(l=>l.region===r).map(locTable).join("")}</section>`).join("");
+}
+
+function locTable(l){
+  const rows = l.days.map(d => {
+    const vals = MODELS.map(m => d.snow[m.label]);
+    const has = Math.max(...vals.map(v=>v ?? 0)) >= STORM_MIN;
+    const notes = [];
+    if (d.hi != null && d.hi <= 32) notes.push("Stays below freezing");
+    if (d.precip && d.fzl != null){
+      const snowLine = mToFt(d.fzl) - 1000;
+      if (snowLine > l.elevFt) notes.push("Rain likely at this elevation");
+    }
+    return `<tr><td>${dayName(d.date)}</td>
+      <td class="snow ${has ? "has" : ""}">${vals.map(fmt).join(" / ")}</td>
+      <td>${d.hi == null ? "–" : Math.round(d.hi)}/${d.lo == null ? "–" : Math.round(d.lo)}</td>
+      <td>${d.precip && d.fzl != null ? mToFt(d.fzl).toLocaleString() : "–"}</td>
+      <td class="note">${notes.join(". ")}</td></tr>`;
+  }).join("");
+  return `<div class="loc"><h3>${l.name}<span>${l.elevFt.toLocaleString()} ft</span></h3>
+    <div class="tw"><table><thead><tr><th>Day</th><th>Snow in (NBM / EC)</th><th>Hi/Lo °F</th><th>Frz lvl ft</th><th>Note</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
+}
+
+async function load(){
+  $("stamp").textContent = "Loading…";
+  try {
+    const res = await fetch(buildUrl());
+    if (!res.ok) throw new Error(`Open-Meteo returned ${res.status}`);
+    let data = await res.json();
+    if (!Array.isArray(data)) data = [data];
+    render(LOCATIONS.map((l,i) => parseLocation(l, data[i])));
+    $("stamp").textContent = "Updated " + new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+  } catch (e){
+    $("headline").innerHTML = `<div class="big err">Couldn't load the forecast.</div><div class="sub">${e.message}. Check your connection and tap Refresh.</div>`;
+    $("stamp").textContent = "Failed";
+  }
+}
+$("refresh").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>
